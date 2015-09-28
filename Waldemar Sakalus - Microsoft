@@ -1,12 +1,37 @@
-// Waldemar Sakalus - Microsoft
-// Example for hackster.io
+// Waldemar Sakalus- SAKA
+// Ver 09152015
+// Traffic from work to BC and from work to HOME
+// see project description on www.hackster.io/saka/traffic-station
+// in order to make this work you need to modify:
+// lines 58 & 59 => your webhook names
+// line 219 & 220 => how the destinations are displayed, max 4 char (e.g. HOME)
+// line 287 & 289 => same webhook names as per lines 58 & 59
 
 int ledGreen = D0;
 int ledYellow = D1;
 int ledRed = D2;
 float mildThreshold = 0.3;
 float heavyThreshold = 0.6;
-unsigned long elapsedTime = 0;
+unsigned long elapsedTimeDest1 = 0;
+unsigned long elapsedTimeDest2 = 0;
+int alternateCall = 0;
+int alternateDest = 0;
+String totalMinutesDest1 = "";
+String delayMinutesDest1 = "";
+String trafficCongestionDisplayDest1 = "Unknown";
+String ledDest1 = "U";
+String totalMinutesDest2 = "";
+String delayMinutesDest2 = "";
+String trafficCongestionDisplayDest2 = "Unknown";
+String ledDest2 = "U";
+
+unsigned long nextTime = millis(); //timer to publish the webhook calls
+unsigned long intervalTime = 30000; //how often to publish the webhook calls
+unsigned long nextDest = millis();
+unsigned long intervalDest = 10000; //how often to alternate betwen destinations
+unsigned long nextDstUpd = millis();
+unsigned long intervalDst = 8000; //How long the destination symbol is displayed
+unsigned long intervalUpd = 2000; //How long the last update min is displayed
 
 // called once on startup
 void setup() {
@@ -25,11 +50,14 @@ void setup() {
     Serial1.write(254); // move cursor to beginning of first line
     Serial1.write(128);
     Serial1.write("Getting traffic");
+    Serial1.write(254); // move cursor to beginning of second line
+    Serial1.write(192);
+    Serial1.write("Design by SAKA");
 
     // Lets listen for the hook response
-    Spark.subscribe("hook-response/traffic_hackster_io", gotTrafficData, MY_DEVICES);
-
-    // Give visuyal cues something is happening and delay publishing for few seconds
+    Spark.subscribe("hook-response/get_traffic_home", gotTrafficData, MY_DEVICES);
+    Spark.subscribe("hook-response/get_traffic_from_work_to_BC", gotTrafficData, MY_DEVICES);
+    // Give visual cues something is happening and delay publishing for few seconds
 
     digitalWrite(ledGreen, LOW);
     digitalWrite(ledYellow, LOW);
@@ -52,32 +80,20 @@ void setup() {
     Serial1.write("                "); // clear display
     Serial1.write(254); // move cursor to beginning of first line
     Serial1.write(128);
-    Serial1.write("Tot:     Dly:   ");
-    Serial1.write(254); // move cursor to beginning of second line
-    Serial1.write(201);
-    Serial1.write("Upd:");
-
-
-
+    Serial1.write("Tot:    Dly:    ");
 }
 
 
 void loop() {
 
-    // Let's request the traffic, but no more than once every 60 seconds.
-
-    // publish the event that will trigger our Webhook
-    Spark.publish("traffic_hackster_io");
+    publishGetTraffic();
     
-    Serial1.write(254); // move cursor to beginning of second line
-    Serial1.write(205);
-    Serial1.write("   "); // clear rest display
-    Serial1.write(254); // move cursor to beginning of second line
-    Serial1.write(205);
-    Serial1.print( (millis() - elapsedTime) / 60000 );
-
-    // and wait at least 60 seconds before doing it again
-    delay(60000);
+    displayResultsDelay();
+    
+    if (millis() > nextDstUpd) {
+        displayElapsedTime(alternateDest);
+        nextDstUpd = nextDest;
+    }
 }
 
 // This function will get called when traffic data comes in
@@ -92,6 +108,7 @@ void gotTrafficData(const char *name, const char *data) {
     String trafficCongestionDisplay;
 
     String str = String(data);
+    String ledDest ="U";
 
     
         // elapsedTime = 0;
@@ -99,7 +116,7 @@ void gotTrafficData(const char *name, const char *data) {
             if (i == 0) {
                 prevIdx = 0;
                 currIdx = str.indexOf("~");
-                String trafficCongestion = str.substring(prevIdx + 1, currIdx);
+                String trafficCongestion = str.substring(prevIdx, currIdx);
                 trafficCongestionDisplay = trafficCongestion;
             }
             else {
@@ -129,49 +146,169 @@ void gotTrafficData(const char *name, const char *data) {
         float travelDelayFloat = travelDurationTrafficMinutesFloat / travelDurationMinutesFloat - 1;
         float travelDelayMinutesFloat = travelDurationTrafficMinutesFloat - travelDurationMinutesFloat;
         String delayMinutes( travelDelayMinutesFloat, 0);
-
+    
+    if (travelDelayFloat < mildThreshold) {
+        ledDest = "G";
+    }
+    else if (travelDelayFloat < heavyThreshold) {
+        ledDest = "Y";
+    }
+    else {
+        ledDest = "R";
+    }
         
-        Serial1.write(254); // move cursor to beginning of first line
-        Serial1.write(132);
-        Serial1.write("     "); // clear rest display
-        Serial1.write(254); // move cursor to beginning of first line
-        Serial1.write(132);
-        Serial1.print( totalMinutes );
-        Serial1.write(254); // move cursor to beginning of first line
-        Serial1.write(141);
-        Serial1.write("   "); // clear rest display
-        Serial1.write(254); // move cursor to beginning of second line
-        Serial1.write(141);
-        Serial1.print( delayMinutes );
-        Serial1.write(254); // move cursor to beginning of first line
-        Serial1.write(192);
-        Serial1.write("         "); // clear rest display
-        Serial1.write(254); // move cursor to beginning of second line
-        Serial1.write(192);
-        Serial1.print( trafficCongestionDisplay );
-        
-        if (travelDelayFloat < mildThreshold) {
-            digitalWrite(ledGreen, HIGH);
-            digitalWrite(ledYellow, LOW);
-            digitalWrite(ledRed, LOW);
-        }
-        else if (travelDelayFloat < heavyThreshold) {
-            digitalWrite(ledGreen, LOW);
-            digitalWrite(ledYellow, HIGH);
-            digitalWrite(ledRed, LOW);
-        }
-        else {
-            digitalWrite(ledGreen, LOW);
-            digitalWrite(ledYellow, LOW);
-            digitalWrite(ledRed, HIGH);
-        }
-            elapsedTime = millis();
-            
-    Serial1.write(254); // move cursor to beginning of second line
-    Serial1.write(205);
-    Serial1.write("   "); // clear rest display
-    Serial1.write(254); // move cursor to beginning of second line
-    Serial1.write(205);
-    Serial1.write("NOW");
+    if (alternateCall == 0) {
+        totalMinutesDest1 = totalMinutes;
+        delayMinutesDest1 = delayMinutes;
+        trafficCongestionDisplayDest1 = trafficCongestionDisplay;
+        ledDest1 = ledDest;
+        elapsedTimeDest1 = millis();
+    }
+    else {
+        totalMinutesDest2 = totalMinutes;
+        delayMinutesDest2 = delayMinutes;
+        trafficCongestionDisplayDest2 = trafficCongestionDisplay;
+        ledDest2 = ledDest;
+        elapsedTimeDest2 = millis();
+    }
 }
 
+ void displayResults(int destNumber) {
+     
+    String totalMinutes = "";
+    String delayMinutes = "";
+    String trafficCongestionDisplay = "Unknown";
+    String ledDest = "U";
+    
+    if (destNumber == 0) {
+        totalMinutes = totalMinutesDest1;
+        delayMinutes = delayMinutesDest1;
+        trafficCongestionDisplay = trafficCongestionDisplayDest1;
+        ledDest = ledDest1;
+    }
+    else {
+        totalMinutes = totalMinutesDest2;
+        delayMinutes = delayMinutesDest2;
+        trafficCongestionDisplay = trafficCongestionDisplayDest2;
+        ledDest = ledDest2;
+    }
+    
+    Serial1.write(254); // move cursor to beginning of first line
+    Serial1.write(128);
+    Serial1.write("Tot:    Dly:    ");
+    Serial1.write(254); // move cursor to beginning of first line
+    Serial1.write(132);
+    Serial1.write("   "); // clear rest display
+    Serial1.write(254); // move cursor to beginning of first line
+    Serial1.write(132);
+    Serial1.print( totalMinutes );
+    Serial1.write(254); // move cursor to beginning of first line
+    Serial1.write(140);
+    Serial1.write("    "); // clear rest display
+    Serial1.write(254); // move cursor to beginning of second line
+    Serial1.write(140);
+    Serial1.print( delayMinutes );
+    Serial1.write(254); // move cursor to beginning of first line
+    Serial1.write(192);
+    Serial1.write("       "); // clear rest display
+    Serial1.write(254); // move cursor to beginning of second line
+    Serial1.write(192);
+    Serial1.print( trafficCongestionDisplay );
+        
+    switchLed (ledDest);
+    if (destNumber == 0) displayDest ("BC");
+    else displayDest ("HOME");
+    nextDstUpd += intervalDst;
+ }
+ 
+ void switchLed (String ledDest ) {
+    if (ledDest == "G") {
+        digitalWrite(ledGreen, HIGH);
+        digitalWrite(ledYellow, LOW);
+        digitalWrite(ledRed, LOW);
+    }
+    else if (ledDest == "Y") {
+        digitalWrite(ledGreen, LOW);
+        digitalWrite(ledYellow, HIGH);
+        digitalWrite(ledRed, LOW);
+    }
+    else if (ledDest == "R") {
+        digitalWrite(ledGreen, LOW);
+        digitalWrite(ledYellow, LOW);
+        digitalWrite(ledRed, HIGH);
+    }
+    else {
+        digitalWrite(ledGreen, LOW);
+        digitalWrite(ledYellow, LOW);
+        digitalWrite(ledRed, LOW);
+    }
+ }
+ 
+ void displayElapsedTime (int destNumber) {
+    unsigned long elapsedTime = 0;
+    
+    if (destNumber == 0) {
+        elapsedTime = elapsedTimeDest1;
+    }
+    else {
+        elapsedTime = elapsedTimeDest2;
+    }
+    
+    Serial1.write(254); // move cursor to lower right quadrant
+    Serial1.write(200);
+    Serial1.write("Upd:");
+    Serial1.write(254); // move cursor to to Upd: results
+    Serial1.write(204);
+    Serial1.write("    "); // clear rest display
+    Serial1.write(254); // move cursor to beginning of second line
+    Serial1.write(204);
+    if ((millis()- elapsedTime) < 60000) Serial1.write("NOW");
+    else Serial1.print( (millis() - elapsedTime) / 60000 );
+ }
+ 
+ void displayDest (String destSymbol) {
+    Serial1.write(254); // move cursor to beginning of lower right quadrant
+    Serial1.write(200);
+    Serial1.write("Dst:");
+    Serial1.write(254); // move cursor to to Upd: results
+    Serial1.write(204);
+    Serial1.write("    "); // clear rest display
+    Serial1.write(254); // move cursor to beginning of second line
+    Serial1.write(204);
+    Serial1.print(destSymbol);
+ }
+ 
+void publishGetTraffic() {
+    // Let's request the traffic, but no more than once every 60 seconds per destination
+    if (millis() > nextTime) {
+        // publish the event that will trigger our Webhook
+        if (alternateCall == 0) {
+            alternateCall = 1;
+            Spark.publish("get_traffic_home");
+        }
+        else {
+            alternateCall = 0;
+            Spark.publish("get_traffic_from_work_to_BC");
+        }
+        // and wait at least 30 seconds before doing it again
+        nextTime += intervalTime;
+        //delay(30s);
+    }
+ }
+
+ void displayResultsDelay () {
+    if (millis() > nextDest) {
+        // publish the event that will trigger our Webhook
+        if (alternateDest == 0) {
+            alternateDest = 1;
+            displayResults (alternateDest);
+        }
+        else {
+            alternateDest = 0;
+            displayResults (alternateDest);
+        }
+        // and wait at least 30 seconds before doing it again
+        nextDest += intervalDest;
+        //delay(15s);
+    }
+ }
